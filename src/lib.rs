@@ -31,10 +31,6 @@ struct Stash {
     dbp     : r2d2::Pool<PostgresConnectionManager>,
 }
 
-pub struct Qlnk {
-    config  : Config
-}
-
 pub fn run() {
     let config = readconfig();
     let dbpool = connect_db(&config);
