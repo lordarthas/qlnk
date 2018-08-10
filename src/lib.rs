@@ -7,7 +7,7 @@ extern crate r2d2_postgres;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 
-use actix::prelude::*;
+//use actix::prelude::*;
 use actix_web::{server, App, http::Method, HttpRequest, HttpResponse};
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 use failure::Error;
@@ -45,7 +45,8 @@ pub fn run() {
     server::HttpServer::new(move || App::with_state(Stash{ dbp: dbpool.clone() })
         .resource("/", |r| r.f(home))
         .resource("/find_shortcode/{shortcode}", |r| r.method(Method::GET).f(find_shortcode))
-        .resource("/create", |r| r.method(Method::POST).f(create_shortcode))
+        //.resource("/create", |r| r.method(Method::POST).f(create))
+        .resource("/create", |r| r.f(create))
     ).bind("127.0.0.1:3000").unwrap().run();
 }
 
@@ -53,7 +54,7 @@ fn home(_req: &HttpRequest<Stash>) -> &'static str {
     "We do not have a home page yet!"
 }
 
-fn find_shortcode(req: HttpRequest<Stash>) -> Result<HttpResponse, Error> {
+fn find_shortcode(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
 // get '/:shortcode' => [shortcode => qr/[A-Za-z0-9]{8}/] => sub($self) {
 //     my $link = $self->pg->db->query('select targeturl from links where shortcode = ?', $self->stash->{shortcode})->hash;
 //     if (defined $link) {
@@ -70,7 +71,9 @@ fn find_shortcode(req: HttpRequest<Stash>) -> Result<HttpResponse, Error> {
         .body(body))
 }
 
-fn create_shortcode(req: HttpRequest<Stash>) -> Result<HttpResponse, Error> {
+fn create(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
+    let dbc = req.state().dbp.get().unwrap();
+    dbc.execute("insert into links (shortcode, targeturl) values ($1, $2)", &[&"a".to_string(), &"b".to_string()]).unwrap();
 //     let targeturl = String::from("https://www.cattlegrid.info/"); // Static for tests
 
 // // let shortcode: String = rand::thread_rng().gen_ascii_chars().take(len).collect();
