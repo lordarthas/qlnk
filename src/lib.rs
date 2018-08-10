@@ -5,13 +5,13 @@ extern crate r2d2;
 extern crate r2d2_postgres;
 
 #[macro_use] extern crate failure;
-#[macro_use] extern crate lazy_static;
 
 //use actix::prelude::*;
 use actix_web::{server, App, http::Method, HttpRequest, HttpResponse};
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 use failure::Error;
 
+#[derive(Clone,Debug)]
 struct DbConfig {
     host    : String,
     name    : String,
@@ -19,6 +19,7 @@ struct DbConfig {
     pwd     : String
 }
 
+#[derive(Clone,Debug)]
 struct Config {
     db      : DbConfig,
     addr    : String,
@@ -26,23 +27,19 @@ struct Config {
 }
 
 struct Stash {
-    dbp: r2d2::Pool<PostgresConnectionManager>,
+    config  : Config,
+    dbp     : r2d2::Pool<PostgresConnectionManager>,
 }
 
 pub struct Qlnk {
     config  : Config
 }
 
-lazy_static! {
-    static ref CONFIG   : Config = readconfig();
-    // "std::cell::RefCell<postgres::InnerConnection>` cannot be shared between threads safely"
-    //static ref DBC      : postgres::Connection = connect_db(); 
-}
-
 pub fn run() {
-    let dbpool = connect_db();
+    let config = readconfig();
+    let dbpool = connect_db(&config);
 
-    server::HttpServer::new(move || App::with_state(Stash{ dbp: dbpool.clone() })
+    server::HttpServer::new(move || App::with_state(Stash{ config: config.clone(), dbp: dbpool.clone() })
         .resource("/", |r| r.f(home))
         .resource("/find_shortcode/{shortcode}", |r| r.method(Method::GET).f(find_shortcode))
         //.resource("/create", |r| r.method(Method::POST).f(create))
@@ -110,8 +107,8 @@ fn readconfig() -> Config {
     }
 }
 
-fn connect_db() -> r2d2::Pool<PostgresConnectionManager> {
-    let cstring = format!("postgres://{}:{}@{}/{}", CONFIG.db.user, CONFIG.db.pwd, CONFIG.db.host, CONFIG.db.name);
+fn connect_db(config: &Config) -> r2d2::Pool<PostgresConnectionManager> {
+    let cstring = format!("postgres://{}:{}@{}/{}", config.db.user, config.db.pwd, config.db.host, config.db.name);
     let manager = PostgresConnectionManager::new(cstring, TlsMode::None).unwrap();
     r2d2::Pool::new(manager).unwrap()
 }
