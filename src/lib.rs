@@ -3,6 +3,7 @@ extern crate actix_web;
 extern crate postgres;
 extern crate r2d2;
 extern crate r2d2_postgres;
+extern crate rand;
 
 #[macro_use] extern crate failure;
 
@@ -10,6 +11,8 @@ extern crate r2d2_postgres;
 use actix_web::{server, App, http::Method, HttpRequest, HttpResponse};
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 use failure::Error;
+use rand::{thread_rng, Rng};
+use rand::distributions::{Alphanumeric};
 
 #[derive(Clone,Debug)]
 struct DbConfig {
@@ -21,9 +24,10 @@ struct DbConfig {
 
 #[derive(Clone,Debug)]
 struct Config {
-    db      : DbConfig,
-    addr    : String,
-    auth    : String
+    db              : DbConfig,
+    addr            : String,
+    auth            : String,
+    shortcode_len   : usize,
 }
 
 struct Stash {
@@ -34,17 +38,18 @@ struct Stash {
 pub fn run() {
     let config = readconfig();
     let dbpool = connect_db(&config);
+    let listen_addr = config.addr.clone(); // Clone it before it's moved into the closure
 
     server::HttpServer::new(move || App::with_state(Stash{ config: config.clone(), dbp: dbpool.clone() })
         .resource("/", |r| r.f(home))
         .resource("/find_shortcode/{shortcode}", |r| r.method(Method::GET).f(find_shortcode))
         //.resource("/create", |r| r.method(Method::POST).f(create))
         .resource("/create", |r| r.f(create))
-    ).bind("127.0.0.1:3000").unwrap().run();
+    ).bind(listen_addr).unwrap().run();
 }
 
-fn home(_req: &HttpRequest<Stash>) -> &'static str {
-    "We do not have a home page yet!"
+fn home(req: &HttpRequest<Stash>) -> String {
+    format!("We're listening on {}!", req.state().config.addr) 
 }
 
 fn find_shortcode(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
@@ -66,26 +71,18 @@ fn find_shortcode(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
 
 fn create(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
     let dbc = req.state().dbp.get().unwrap();
-    dbc.execute("insert into links (shortcode, targeturl) values ($1, $2)", &[&"a".to_string(), &"b".to_string()]).unwrap();
-//     let targeturl = String::from("https://www.cattlegrid.info/"); // Static for tests
 
-// // let shortcode: String = rand::thread_rng().gen_ascii_chars().take(len).collect();
+    let targeturl = String::from("https://www.cattlegrid.info/"); // Static for tests
+    let shortcode: String = rand::thread_rng().sample_iter(&Alphanumeric)
+        .take( req.state().config.shortcode_len ).collect();
 
-//     Ok(Response::with((status::Ok, "Create a shortcode for URL... TODO")))
+    dbc.execute("insert into links (shortcode, targeturl) values ($1, $2)",
+        &[&shortcode, &targeturl]
+    ).unwrap();
 
-//     // conn.execute("CREATE TABLE person (
-//     //                 id              SERIAL PRIMARY KEY,
-//     //                 name            VARCHAR NOT NULL,
-//     //                 data            BYTEA
-//     //               )", &[]).unwrap();
-//     // let me = Person {
-//     //     id: 0,
-//     //     name: "Steven".to_string(),
-//     //     data: None,
-//     // };
     Ok(HttpResponse::Ok()
         .content_type("text/plain")
-        .body("Creating shortcode"))
+        .body(format!("Created shortcode : {}", shortcode)))
 }
 
 /// Reads configuration - it's actually coded inline, but should be read
@@ -98,8 +95,9 @@ fn readconfig() -> Config {
             user    : String::from("qlnk"),
             pwd     : String::from("pqlnk")
         },
-        addr: String::from("localhost:3000"),
-        auth: String::from("basicauth"),
+        shortcode_len   : 8,
+        addr            : String::from("localhost:3000"),
+        auth            : String::from("basicauth"),
     }
 }
 
