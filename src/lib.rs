@@ -6,12 +6,13 @@ extern crate r2d2_postgres;
 extern crate rand;
 
 #[macro_use] extern crate failure;
+#[macro_use] extern crate serde_derive;
 
 //use actix::prelude::*;
 use actix_web::{server, App, http::Method, HttpRequest, HttpResponse};
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 use failure::Error;
-use rand::{thread_rng, Rng};
+use rand::{Rng};
 use rand::distributions::{Alphanumeric};
 
 #[derive(Clone,Debug)]
@@ -30,9 +31,15 @@ struct Config {
     shortcode_len   : usize,
 }
 
-struct Stash {
+struct Context {
     config  : Config,
     dbp     : r2d2::Pool<PostgresConnectionManager>,
+}
+
+#[derive(Deserialize,Debug)]
+struct CreateArgs {
+    auth        : String,
+    targeturl   : String,
 }
 
 pub fn run() {
@@ -40,21 +47,21 @@ pub fn run() {
     let dbpool = connect_db(&config);
     let listen_addr = config.addr.clone(); // Clone it before it's moved into the closure
 
-    server::HttpServer::new(move || App::with_state(Stash{ config: config.clone(), dbp: dbpool.clone() })
+    server::HttpServer::new(move || App::with_state(Context{ config: config.clone(), dbp: dbpool.clone() })
         .resource("/", |r| r.f(home))
         .resource("/find_shortcode/{shortcode}", |r| r.method(Method::GET).f(find_shortcode))
-        //.resource("/create", |r| r.method(Method::POST).f(create))
-        .resource("/create", |r| r.f(create))
+        .resource("/create", |r| r.method(Method::POST).f(create))
+        //.resource("/create", |r| r.f(create))
     ).bind(listen_addr).unwrap().run();
 }
 
-fn home(req: &HttpRequest<Stash>) -> String {
+fn home(req: &HttpRequest<Context>) -> String {
     format!("We're listening on {}!", req.state().config.addr) 
 }
 
-fn find_shortcode(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
+fn find_shortcode(req: &HttpRequest<Context>) -> Result<HttpResponse, Error> {
 // get '/:shortcode' => [shortcode => qr/[A-Za-z0-9]{8}/] => sub($self) {
-//     my $link = $self->pg->db->query('select targeturl from links where shortcode = ?', $self->stash->{shortcode})->hash;
+//     my $link = $self->pg->db->query('select targeturl from links where shortcode = ?', $self->Context->{shortcode})->hash;
 //     if (defined $link) {
 //         $self->res->code(303);
 //         return $self->redirect_to( $link->{targeturl} );
@@ -69,20 +76,22 @@ fn find_shortcode(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
         .body(body))
 }
 
-fn create(req: &HttpRequest<Stash>) -> Result<HttpResponse, Error> {
+fn create(req: &HttpRequest<Context>) -> Result<HttpResponse, Error> {
     let dbc = req.state().dbp.get().unwrap();
 
-    let targeturl = String::from("https://www.cattlegrid.info/"); // Static for tests
-    let shortcode: String = rand::thread_rng().sample_iter(&Alphanumeric)
-        .take( req.state().config.shortcode_len ).collect();
+    req.json().from_err().and_then(|val: CreateArgs| {
+        let targeturl = String::from("https://www.cattlegrid.info/");
+        let shortcode: String = rand::thread_rng().sample_iter(&Alphanumeric)
+            .take( req.state().config.shortcode_len ).collect();
 
-    dbc.execute("insert into links (shortcode, targeturl) values ($1, $2)",
-        &[&shortcode, &targeturl]
-    ).unwrap();
+        dbc.execute("insert into links (shortcode, targeturl) values ($1, $2)",
+            &[&shortcode, &targeturl]
+        ).unwrap();
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/plain")
-        .body(format!("Created shortcode : {}", shortcode)))
+        Ok(HttpResponse::Ok()
+            .content_type("text/plain")
+            .body(format!("Created shortcode : {}", shortcode)))
+    }).responder()
 }
 
 /// Reads configuration - it's actually coded inline, but should be read
